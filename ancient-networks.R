@@ -142,7 +142,7 @@ water_poly <- rbind(water_mulitpolygons,water_polygons,waterway_mulitpolygons,wa
   st_transform(4326) %>% dplyr::select(geometry) 
 plot(water_poly)
 water_line <- rbind(coastline, water_lines,waterway_lines,waterway_multilines) %>%
-  st_simplify(., dTolerance = 1000)  %>% 
+  #st_simplify(., dTolerance = 1000)  %>% 
   st_intersection(.,st_as_sfc(st_bbox(aoi_box))) %>%
   st_transform(4326) %>% dplyr::select(geometry)
 plot(water_line)
@@ -183,11 +183,18 @@ plot(impassable_barriers)
 
 # Build Delaunay triangulation across all sites
 sites_graph <- sites_clean %>% st_transform(3857)
+ggplot() +
+  geom_sf(data = sites_graph%>% st_transform(4326), alpha = .7, fill ='black', color = 'black', aes(size = Tot_area_h)) +
+  geom_raster(data = relief, aes(x = x, y = y, alpha = value)) +
+  scale_alpha(range = c(-1.5, 1)) +
+  geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
+  geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
+  theme_void()
 sites_triangulated <- st_triangulate(sites_graph %>% sf::st_union(), dTolerance = 0, bOnlyEdges = TRUE) %>%
   st_as_sf() %>% st_cast("LINESTRING") %>% rename(geometry = x) 
 plot(sites_triangulated) 
 
-# Build local site clusters
+# Build local site clusters (INFOMAP)
 sites_community_graph <- as_sfnetwork(sites_triangulated, directed = FALSE) %>%
   activate("edges") %>%
   convert(to_spatial_explicit) %>%
@@ -195,24 +202,28 @@ sites_community_graph <- as_sfnetwork(sites_triangulated, directed = FALSE) %>%
   activate("nodes") %>%
   mutate(rank = node_rank_hclust(weights = weight)) %>%
   mutate(community = as.factor(group_infomap(weights = weight, node_weights = rank))) 
+plot(sites_community_graph)
 
-# Convert clusters to polygons
 sites_community <- sites_community_graph %>%
   sf::st_as_sf() %>% 
   dplyr::group_by(community) %>% 
   dplyr::summarise() %>%
   st_cast("POLYGON") %>%
   st_convex_hull() %>%
-  st_buffer(dist = 20)
+  st_buffer(dist = units::set_units(10,km))
 plot(sites_community)
+ggplot() + 
+  geom_sf(data = sites_community, aes(fill = community, color = community), alpha = .5) + 
+  geom_sf(data = sites_community_graph %>% activate('nodes') %>% sf::st_as_sf() , 
+          color = 'black', alpha = .5) + theme_void()
 
 # Connect sites that are within local clusters and no further than 50km apart
 sites_tri_graph <- as_sfnetwork(sites_triangulated, directed = FALSE) %>%
   activate("edges") %>%
   convert(to_spatial_explicit) %>%
   mutate(weight = edge_length()) %>% 
-  filter(weight <= units::set_units(60,km)) %>%
-  filter(edge_is_within(sites_community)) %>%
+  filter(weight <= units::set_units(80,km)) %>%
+  filter(edge_is_within(sites_community) | weight <= units::set_units(30,km)) %>%
   filter(!edge_crosses(impassable_barriers %>% st_transform(3857)))
 plot(sites_tri_graph)
 sites_tri_graph 
@@ -233,6 +244,11 @@ sites_min_span_tree <- as_sfnetwork(sites_triangulated, directed = FALSE) %>%
   filter(!edge_intersects(impassable_barriers %>% st_transform(3857))) %>%
   mutate(weight = edge_length()) %>%
   convert(to_minimum_spanning_tree, weights = weight) 
+plot(impassable_barriers %>% dplyr::select(x))
+plot(sites_triangulated %>% dplyr::select(geometry), add = TRUE)
+plot(impassable_barriers %>% dplyr::select(x))
+plot(impassable_barriers %>% dplyr::select(x))
+plot(sites_min_span_tree, add = TRUE)
 plot(sites_min_span_tree)
 sites_min_span_tree
 
@@ -240,6 +256,7 @@ sites_min_span_tree
 sites_iso_nodes <- sites_min_span_tree %>%
   activate("nodes") %>%
   filter(node_is_isolated()) 
+sites_iso_nodes
 if (nrow(sites_iso_nodes %>% activate("nodes") %>% st_as_sf()) > 0) {
   sites_iso_edges <- st_connect(x = sites_iso_nodes %>% st_as_sf(), 
                                 y = sites_min_span_tree %>% st_as_sf(), k = 1) %>% as_sfnetwork()
@@ -302,7 +319,7 @@ theme_map <- theme_minimal() +
     geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = activate(end, "edges") %>% st_as_sf(), color = '#FF9671', size = .9, alpha = .5) +
     geom_sf(data = activate(end, "nodes") %>% st_as_sf(), 
-            aes(color =  betweeness_centrality, fill = betweeness_centrality, size =  betweeness_centrality), 
+            aes(color =  betweeness_centrality_wt, fill = betweeness_centrality_wt, size =  betweeness_centrality), 
             alpha = .8) +
     scale_color_viridis(option = 'plasma') +
     scale_fill_viridis(option = 'plasma') + 
@@ -313,7 +330,8 @@ theme_map <- theme_minimal() +
 (p_size <- ggplot() +
     geom_raster(data = relief, aes(x = x, y = y, alpha = value)) +
     scale_alpha(range = c(-1.5, 1)) +
-    geom_sf(data = water_int, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
+    geom_sf(data = water_line, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
+    geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = activate(end, "edges") %>% st_as_sf(), color = '#FF9671', size = .9, alpha = .5) +
     geom_sf(data = sites_clean, aes(size = Tot_area_h, color = Tot_area_h, fill =  Tot_area_h), alpha = .8) +
@@ -341,13 +359,14 @@ st_write(sites_routes, '/Users/nm/Desktop/sites_routes.geojson')
 
 # Correlation visualization
 sites_corr <- sites_points %>% st_drop_geometry() %>% 
-  filter(Tot_area_h > 0, betweeness_centrality > 0) %>%
+  filter(Tot_area_h > 0, betweeness_centrality_wt > 0) %>%
   mutate(Tot_area_h_ln = log(Tot_area_h),
-         betweeness_centrality_ln = log(betweeness_centrality)) %>%
-  dplyr::select(Tot_area_h, betweeness_centrality) %>%
+         betweeness_centrality_ln = log(betweeness_centrality_wt)) %>%
+  dplyr::select(Tot_area_h, betweeness_centrality_wt) %>%
   rename(`Site size` = Tot_area_h,
-         `Betweeness centrality` = betweeness_centrality)
+         `Betweeness centrality` = betweeness_centrality_wt)
 
-(correlo <- ggpairs(sites_corr) )
+(correlo <- ggpairs(sites_corr) + 
+    theme(text = element_text(size = 16) ))
 ggsave(plot = correlo, '/Users/nm/Desktop/sites_corr.png')
 

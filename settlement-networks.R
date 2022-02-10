@@ -264,7 +264,7 @@ sites_triangulated_weights <- sites_triangulated %>% st_transform(3857) %>%
   mutate(equivalent_distance = horizontal_distance + vertical_distance *  7.92 , # Scarf's equivalence of Naismith's rule (meters)
          slope_dydx = (vertical_distance / horizontal_distance),
          slope_radians = slope*(pi/180),
-         walking_speed = round((6 * exp(-3.5*abs(tan(slope_dydx)+0.05))),2), # Tobler's hiking function (km / h)
+         walking_speed = round((6 * exp(-3.5*abs(tan(slope_radians)+0.05))),2), # Tobler's hiking function (km / h)
          travel_hours = round(((1/walking_speed) * (equivalent_distance/1000)),2))
 ggplot(data = sites_triangulated_weights %>% st_as_sf() %>% st_drop_geometry() %>% 
          mutate(vertical_climb = case_when(vertical_distance <= 200 ~ '1 - 0-200', vertical_distance > 200 & vertical_distance <= 600 ~ '2 - 200-600', vertical_distance > 600 ~ '3 - 600+')), 
@@ -321,7 +321,7 @@ water_sites_edges_weights <- water_sites_edges %>%
   mutate(equivalent_distance = horizontal_distance + vertical_distance *  7.92 , # Scarf's equivalence of Naismith's rule (meters)
          slope_dydx = (vertical_distance / horizontal_distance),
          slope_radians = slope*(pi/180),
-         walking_speed = round((6 * exp(-3.5*abs(tan(slope_dydx)+0.05))),2), # Tobler's hiking function (km / h)
+         walking_speed = round((6 * exp(-3.5*abs(tan(slope_radians)+0.05))),2), # Tobler's hiking function (km / h)
          travel_hours = round(((1/walking_speed) * (equivalent_distance/1000)),2))
 
 # Convert geospatial water data to weighted undirected graph

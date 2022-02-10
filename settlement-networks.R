@@ -42,14 +42,35 @@ sites <- st_read('/Users/nm/Desktop/Projects/work/turk-networks/sites/Ca_sites_2
 
 # Clean up labels and coding
 sites <- sites %>%
-  mutate(absolute_date = case_when(LBA %in% c('*','*?','**') ~ '1650-1200 BCE',
-                                   TRUE ~ as.character('')),
-         archaeological_phase = case_when(LBA == '*' ~ 'Late Bronze Age (LBA)',
-                                          LBA == '*?' ~ 'Late Bronze Age (LBA)',
-                                          LBA == '**' ~ 'Late Bronze Age (LBA)',
-                                          TRUE ~ as.character('')),
-         archaeological_horizon = case_when(LBA == '*' ~ '2nd millennium (II_millBCE)',
-                                            TRUE ~ as.character('')))
+  mutate(absolute_date = case_when(
+    LBA %in% c('*','*?','**') ~ '1650-1200 BCE',
+    EIA_MIA %in% c('*','*?','**') ~ '1200-700 BCE',
+    LIA %in% c('*','*?','**') ~ '700-300 BCE',
+    TRUE ~ as.character('')),
+    archaeological_phase = case_when(ANeo == '*' ~ 'Aceramic Neolithic (ANeo)',
+                                     PNeo == '*' ~ 'Pottery Neolithic (PNeo)',
+                                     ECh == '*' ~ 'Early Chalcolithic (ECh)',
+                                     MCh_LCh == '*' ~ 'Mid-Late Chalcolithic (MCh_LCh)',
+                                     EBI_II == '*' ~ 'Early Bronze Age I-II (EBI_II)',
+                                     EBIII == '*' ~ 'Early Bronze Age III (EBIII)',
+                                     MBA == '*' ~ 'Middle Bronze Age (MBA)',
+                                     LBA == '*' ~ 'Late Bronze Age (LBA)',
+                                     LBA == '*?' ~ 'Late Bronze Age (LBA)',
+                                     LBA == '**' ~ 'Late Bronze Age (LBA)',
+                                     EIA_MIA == '*' ~ 'Early/Mid Iron Age (EIA_MIA)',
+                                     LIA == '*' ~ 'Late Iron Age (LIA)',
+                                     TRUE ~ as.character('')),
+    archaeological_horizon = case_when(ANeo == '*' ~ 'Neolithic (Neo)',
+                                       PNeo == '*' ~ 'Neolithic (Neo)',
+                                       ECh == '*' ~ 'Chalcolithic (Cha)',
+                                       MCh_LCh == '*' ~ 'Chalcolithic (Cha)',
+                                       EBI_II == '*' ~ 'Early Bronze Age (EBA)',
+                                       EBIII == '*' ~ 'Early Bronze Age (EBA)',
+                                       MBA == '*' ~ '2nd millennium (II_millBCE)',
+                                       LBA == '*' ~ '2nd millennium (II_millBCE)',
+                                       EIA_MIA == '*' ~ 'Iron Age (Iron)',
+                                       LIA == '*' ~ 'Iron Age (Iron)',
+                                       TRUE ~ as.character('')))
 sites_clean <- sites %>%
   dplyr::select(-one_of(c( 'ANeo', 'PNeo', 'ECh', 'MCh_LCh', 'EBI_II', 'EBIII', 'MBA', 'LBA', 'EIA_MIA', 'LIA', 
                     'ANeo_ha', 'PNeo_ha', 'ECh_ha', 'MCh_LCh_ha', 'EBI_II_ha', 'EBIII_ha', 'MBA_ha', 'LBA_ha', 'EIA_MIA_ha', 'LIA_ha'))) 
@@ -241,11 +262,14 @@ sites_triangulated_weights <- sites_triangulated %>% st_transform(3857) %>%
   mutate(st_extract(x = elevation_terrain, at = ., FUN = mean) %>% st_as_sf() %>% st_drop_geometry() %>% rename(mean = names(.)[1] )) %>%
   mutate(vertical_distance = max-min, horizontal_distance = st_length(.)) %>% drop_units() %>%
   mutate(equivalent_distance = horizontal_distance + vertical_distance *  7.92 , # Scarf's equivalence of Naismith's rule (meters)
-         walking_speed = round((6 * exp(-3.5*abs(tan(slope*(pi/180))+0.05))),2), # Tobler's hiking function (km / h)
+         slope_dydx = (vertical_distance / horizontal_distance),
+         slope_radians = slope*(pi/180),
+         walking_speed = round((6 * exp(-3.5*abs(tan(slope_dydx)+0.05))),2), # Tobler's hiking function (km / h)
          travel_hours = round(((1/walking_speed) * (equivalent_distance/1000)),2))
 ggplot(data = sites_triangulated_weights %>% st_as_sf() %>% st_drop_geometry() %>% 
          mutate(vertical_climb = case_when(vertical_distance <= 200 ~ '1 - 0-200', vertical_distance > 200 & vertical_distance <= 600 ~ '2 - 200-600', vertical_distance > 600 ~ '3 - 600+')), 
        aes(x=travel_hours)) + geom_histogram(bins = 20, aes(fill = vertical_climb))
+plot(sites_triangulated_weights %>% dplyr::select(travel_hours))
 
 # Convert geospatial triangulation data to weighted undirected graph
 sites_triangulated_weights_graph <- sites_triangulated_weights %>%
@@ -295,7 +319,9 @@ water_sites_edges_weights <- water_sites_edges %>%
   mutate(st_extract(x = elevation_terrain, at = ., FUN = mean) %>% st_as_sf() %>% st_drop_geometry() %>% rename(mean = names(.)[1] )) %>%
   mutate(vertical_distance = max-min, horizontal_distance = st_length(.)) %>% drop_units() %>%
   mutate(equivalent_distance = horizontal_distance + vertical_distance *  7.92 , # Scarf's equivalence of Naismith's rule (meters)
-         walking_speed = round((6 * exp(-3.5*abs(tan(slope*(pi/180))+0.05))),2), # Tobler's hiking function (km / h)
+         slope_dydx = (vertical_distance / horizontal_distance),
+         slope_radians = slope*(pi/180),
+         walking_speed = round((6 * exp(-3.5*abs(tan(slope_dydx)+0.05))),2), # Tobler's hiking function (km / h)
          travel_hours = round(((1/walking_speed) * (equivalent_distance/1000)),2))
 
 # Convert geospatial water data to weighted undirected graph
@@ -455,4 +481,5 @@ sites_clusters <- sites_clusters_graph %>%
 ggplot() + 
   geom_sf(data = sites_clusters, aes(fill = clusters, color = clusters), alpha = .5) + 
   geom_sf(data = sites_clusters_graph %>% activate('nodes') %>% sf::st_as_sf() , color = 'black', alpha = .5) + theme_void()
+
 

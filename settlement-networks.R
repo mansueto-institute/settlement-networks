@@ -37,52 +37,28 @@ library(patchwork)
 
 # Load and clean up archaeological data -----------------------------------
 
+# Read in file
 sites <- st_read('/Users/nm/Desktop/Projects/work/turk-networks/sites/Ca_sites_271021.shp')
 
+# Clean up labels and coding
 sites <- sites %>%
-  mutate(absolute_date = case_when(#ANeo %in% c('*','*?','**') ~ '8500-7000 BCE', 
-                                   #PNeo %in% c('*','*?','**') ~ '7000-6000 BCE',
-                                   #ECh %in% c('*','*?','**') ~ '6000-5500 BCE',
-                                   #MCh_LCh %in% c('*','*?','**') ~ '5500-3300 BCE',
-                                   #EBI_II %in% c('*','*?','**') ~ '3300-2500 BCE',
-                                   #EBIII %in% c('*','*?','**') ~ '2500-2000 BCE',
-                                   #MBA %in% c('*','*?','**') ~ '2000-1650 BCE',
-                                   LBA %in% c('*','*?','**') ~ '1650-1200 BCE',
-                                   EIA_MIA %in% c('*','*?','**') ~ '1200-700 BCE',
-                                   LIA %in% c('*','*?','**') ~ '700-300 BCE',
+  mutate(absolute_date = case_when(LBA %in% c('*','*?','**') ~ '1650-1200 BCE',
                                    TRUE ~ as.character('')),
-         archaeological_phase = case_when(ANeo == '*' ~ 'Aceramic Neolithic (ANeo)',
-                                          PNeo == '*' ~ 'Pottery Neolithic (PNeo)',
-                                          ECh == '*' ~ 'Early Chalcolithic (ECh)',
-                                          MCh_LCh == '*' ~ 'Mid-Late Chalcolithic (MCh_LCh)',
-                                          EBI_II == '*' ~ 'Early Bronze Age I-II (EBI_II)',
-                                          EBIII == '*' ~ 'Early Bronze Age III (EBIII)',
-                                          MBA == '*' ~ 'Middle Bronze Age (MBA)',
-                                          LBA == '*' ~ 'Late Bronze Age (LBA)',
+         archaeological_phase = case_when(LBA == '*' ~ 'Late Bronze Age (LBA)',
                                           LBA == '*?' ~ 'Late Bronze Age (LBA)',
                                           LBA == '**' ~ 'Late Bronze Age (LBA)',
-                                          EIA_MIA == '*' ~ 'Early/Mid Iron Age (EIA_MIA)',
-                                          LIA == '*' ~ 'Late Iron Age (LIA)',
                                           TRUE ~ as.character('')),
-         archaeological_horizon = case_when(ANeo == '*' ~ 'Neolithic (Neo)',
-                                            PNeo == '*' ~ 'Neolithic (Neo)',
-                                            ECh == '*' ~ 'Chalcolithic (Cha)',
-                                            MCh_LCh == '*' ~ 'Chalcolithic (Cha)',
-                                            EBI_II == '*' ~ 'Early Bronze Age (EBA)',
-                                            EBIII == '*' ~ 'Early Bronze Age (EBA)',
-                                            MBA == '*' ~ '2nd millennium (II_millBCE)',
-                                            LBA == '*' ~ '2nd millennium (II_millBCE)',
-                                            EIA_MIA == '*' ~ 'Iron Age (Iron)',
-                                            LIA == '*' ~ 'Iron Age (Iron)',
+         archaeological_horizon = case_when(LBA == '*' ~ '2nd millennium (II_millBCE)',
                                             TRUE ~ as.character('')))
-
 sites_clean <- sites %>%
   dplyr::select(-one_of(c( 'ANeo', 'PNeo', 'ECh', 'MCh_LCh', 'EBI_II', 'EBIII', 'MBA', 'LBA', 'EIA_MIA', 'LIA', 
                     'ANeo_ha', 'PNeo_ha', 'ECh_ha', 'MCh_LCh_ha', 'EBI_II_ha', 'EBIII_ha', 'MBA_ha', 'LBA_ha', 'EIA_MIA_ha', 'LIA_ha'))) 
 
+# Select time window
 sites_clean <- sites_clean %>%
   filter(archaeological_phase == 'Late Bronze Age (LBA)')
 
+# Extract lat lons
 sites_clean <- sites_clean %>%
   st_transform(3395)  %>%
   mutate(lon = map_dbl(geometry, ~st_point_on_surface(.x)[[1]]),
@@ -94,41 +70,75 @@ sites_clean <- sites_clean %>%
   mutate(lon = map_dbl(geometry, ~st_point_on_surface(.x)[[1]]),
          lat = map_dbl(geometry, ~st_point_on_surface(.x)[[2]]))
 
+# Rename columns to generic labels 
+sites_clean <- sites_clean %>%
+  rename(site_name = Name,
+         site_size = Tot_area_h)
+
+# Data assumptions and issues ---------------------------------------------
+
+# Input data format:
+# Simpled features dataframe is called "sites_clean"
+# Site name column is labelled "site_name"
+# Site size column is labelled "site_size"
+# All sites are individual Point geometries
+# Not tested on areas outside of Turkey so may not perfectly generalize
+
+# Rule based thresholds (see comments marked with "# assumption!"):
+# Local networks are routes that take no more than 12 hours to travel by foot
+# Routes connectings sites to water bodies must be within 60 km
+# Travel time calculations based on Scarf's equivalence of Naismith's rule and Tobler's hiking function
+
+# Features not in current version:
+# Add weights for crossing rivers according to Strahler number
+# Develop method to handle oceanic networks and sea port nodes
+
+# Known issues:
+# Site data is mapped to the centrality measure data via a st_join using the st_nn function
+# The sfnetwork adds pseudonodes when routing around circular linestrings (i.e. water bodies)
+# See https://github.com/luukvdmeer/sfnetworks/issues/59
+
 # Download natural data layers ---------------------------------------------
 
 aoi_box = st_bbox(sites_clean %>% st_transform(4326)) %>% st_as_sfc()
 aoi_box = (aoi_box - st_centroid(aoi_box)) * 1.1 + st_centroid(aoi_box)
-st_crs(aoi_box) = 4326
+aoi_box <- aoi_box %>% st_set_crs(4326)
+Sys.sleep(2)
 
 # Download elevation layer for visualization (higher res)
 elevation <- get_elev_raster(locations = aoi_box, z = 7, clip = "bbox") # expand = 4000, 
 Sys.sleep(2)
-relief_spdf <- as(elevation, "SpatialPixelsDataFrame")
-relief <- as.data.frame(relief_spdf) %>% 
-  rename_at(vars(starts_with("file")), ~paste0("value"))
-Sys.sleep(2)
 
+# Convert elevation to Spatial Pixel Dataframe
+relief <- as.data.frame(as(elevation, "SpatialPixelsDataFrame")) %>%
+  rename(value = names(.)[1] )
 # Convert elevation to Spatiotemporal Array format
 elevation_terrain <- elevation %>%
   projectRaster(from = ., crs=crs(aoi_box %>% st_transform(3857)) ) %>% st_as_stars()
 plot(elevation_terrain, breaks = "equal", col = hcl.colors(11, "Spectral"), main = "input (elevation)")
+ggplot() +
+  geom_stars(data = elevation_terrain) + 
+  scale_fill_gradient(low =  '#36454F', high = 'white' , na.value = 'white') 
 
 # Calculate slope in decimal degrees (0-360 clockwise from north)
 elevation_terrain_slope = slope(elevation_terrain)
 plot(elevation_terrain_slope, breaks = "equal",  col = hcl.colors(11, "Spectral"), main = "output (slope)")
 
+Sys.sleep(2)
 # Download OSM water features 
 water <- opq(bbox = st_bbox(aoi_box)) %>%
   add_osm_feature(key = 'water') %>%
   osmdata_sf() 
+Sys.sleep(5)
 water_mulitpolygons <- water$osm_multipolygons %>% dplyr::select(osm_id)
 water_polygons <- water$osm_polygons %>% dplyr::select(osm_id)
 water_lines <- water$osm_lines %>% dplyr::select(osm_id)
-Sys.sleep(2)
+Sys.sleep(5)
 # Download OSM waterway features
 waterway <- opq(bbox = st_bbox(aoi_box)) %>%
   add_osm_feature(key = 'waterway') %>%
   osmdata_sf() 
+Sys.sleep(5)
 waterway_mulitpolygons <- waterway$osm_multipolygons %>% dplyr::select(osm_id)
 waterway_polygons <- waterway$osm_polygons %>% dplyr::select(osm_id)
 waterway_lines <- waterway$osm_lines %>% dplyr::select(osm_id)
@@ -139,6 +149,7 @@ coastline <- opq(bbox = st_bbox(aoi_box)) %>%
   add_osm_feature(key = 'natural', value = 'coastline') %>%
   osmdata_sf() %>%
   pluck("osm_lines")%>% dplyr::select(osm_id)
+Sys.sleep(5)
 # Parse and combine water linestrings and polygons
 water_poly <- rbind(water_mulitpolygons,water_polygons,waterway_mulitpolygons,waterway_polygons) %>%
   st_simplify(., dTolerance = 500) %>% 
@@ -150,9 +161,10 @@ water_line <- rbind(coastline, water_lines,waterway_lines,waterway_multilines) %
   st_intersection(.,st_as_sfc(st_bbox(aoi_box))) %>%
   st_transform(4326) %>% dplyr::select(geometry)
 plot(water_line)
+Sys.sleep(5)
 # Download ocean feature from naturalearthdata.com
 ocean <- ne_download(scale = 'large', type = 'ocean', category = 'physical', returnclass='sf')
-Sys.sleep(2)
+Sys.sleep(5)
 ocean_resid <- ocean %>% st_transform(4326) %>% st_make_valid() %>%
   st_intersection(., aoi_box) %>%
   st_cast("POLYGON") %>% st_as_sf() 
@@ -168,7 +180,7 @@ plot(ocean_area)
 # Build bounding polygon
 crop_box = st_bbox(aoi_box) %>% st_as_sfc()
 crop_box = (crop_box - st_centroid(crop_box)) * 0.999 + st_centroid(crop_box)
-st_crs(crop_box) = 4326
+crop_box <- crop_box %>% st_set_crs(4326)
 
 # Clean up OSM water features
 water_barriers = rbind(water_poly %>% st_as_sf() ) %>% 
@@ -205,12 +217,11 @@ ggplot() +
   geom_sf(data = water_boundaries_poly, color = 'blue') +
   geom_sf(data = water_barriers, color = 'green') 
 
-
 # Generate network and centrality metrics ---------------------------------
 
 # Sites of interest
 sites_nodes <- sites_clean %>% st_transform(3857) %>% mutate(id = row_number())
-ggplot() + geom_sf(data = sites_nodes %>% st_transform(4326), alpha = .7, fill ='black', color = 'black', aes(size = Tot_area_h)) +
+ggplot() + geom_sf(data = sites_nodes %>% st_transform(4326), alpha = .7, fill ='black', color = 'black', aes(size = site_size)) +
   geom_raster(data = relief, aes(x = x, y = y, alpha = value)) + scale_alpha(range = c(-1.5, 1)) +
   geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
   geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) + theme_void()
@@ -232,7 +243,6 @@ sites_triangulated_weights <- sites_triangulated %>% st_transform(3857) %>%
   mutate(equivalent_distance = horizontal_distance + vertical_distance *  7.92 , # Scarf's equivalence of Naismith's rule (meters)
          walking_speed = round((6 * exp(-3.5*abs(tan(slope*(pi/180))+0.05))),2), # Tobler's hiking function (km / h)
          travel_hours = round(((1/walking_speed) * (equivalent_distance/1000)),2))
-plot(sites_triangulated_weights)
 ggplot(data = sites_triangulated_weights %>% st_as_sf() %>% st_drop_geometry() %>% 
          mutate(vertical_climb = case_when(vertical_distance <= 200 ~ '1 - 0-200', vertical_distance > 200 & vertical_distance <= 600 ~ '2 - 200-600', vertical_distance > 600 ~ '3 - 600+')), 
        aes(x=travel_hours)) + geom_histogram(bins = 20, aes(fill = vertical_climb))
@@ -242,17 +252,23 @@ sites_triangulated_weights_graph <- sites_triangulated_weights %>%
   as_sfnetwork(directed = FALSE) %>%
   activate("edges") %>%
   convert(to_spatial_explicit) %>%
-  mutate(weight = travel_hours) 
+  mutate(weight = travel_hours) %>%
+  # Build clusters for later analysis
+  activate("nodes") %>%
+  # Ward's minimum variance method aims at finding compact, spherical clusters
+  mutate(rank = node_rank_hclust(weights = weight, dist = "shortest", method = "ward.D2")) %>%
+  # Map equation to find community structure that minimizes expected length of a random walker trajectory
+  mutate(clusters = as.factor(group_infomap(weights = weight, node_weights = rank))) 
 
 # Subgraph of sites that are within local clusters 
 sites_triangulated_weights_subgraph <- sites_triangulated_weights_graph  %>%
   activate("edges") %>%
-  convert(to_spatial_explicit) %>%
-  filter(travel_hours <= 12) %>% # max 12 hour trip 
+  #convert(to_spatial_explicit) %>%
+  filter(travel_hours <= 12) %>% # assumption! max 12 hour trip 
   filter(!edge_crosses(water_barriers)) %>%
   activate("nodes") %>%
-  filter(!node_is_isolated()) %>% 
-  activate("edges")
+  filter(!node_is_isolated()) # %>% 
+  #activate("edges")
 plot(sites_triangulated_weights_subgraph)
 
 # Subgraph of detours around water bodies
@@ -265,7 +281,7 @@ plot(water_sites)
 
 # Connect water boundaries to nearest sites
 water_sites_edges = st_connect(water_sites, water_boundaries, k = 1, 
-                                maxdist = units::set_units(60000,m)) %>% # fudge factor defining sites "nearby" water bodies
+                                maxdist = units::set_units(60000,m)) %>% # assumption! only connect sites within 60km of water bodies
   st_union(., water_boundaries) %>%
   st_collection_extract(. , type = c( "LINESTRING")) %>% 
   st_cast("LINESTRING") %>% st_as_sf()
@@ -313,7 +329,7 @@ end <- sites_min_span_tree %>%
          betweeness_centrality_wt = centrality_betweenness(weights = weight, directed = FALSE),
          betweeness_centrality = centrality_betweenness(directed = FALSE),
          eigen_centrality_wt = centrality_eigen(weights = weight, directed = FALSE),
-         pagerank_wt = centrality_pagerank(weights = weight, directed = FALSE),
+         #pagerank_wt = centrality_pagerank(weights = weight, directed = FALSE),
          degree_centrality_wt = centrality_degree(weights = weight),
          hub_centrality_wt = centrality_hub(weights= weight),
          authority_centrality_wt = centrality_authority(weights = weight)) %>%
@@ -322,7 +338,17 @@ end <- sites_min_span_tree %>%
                                                                      directed = FALSE))
 plot(end)
 
-# Visualize the results
+# Convert graph to sf dataframes ------------------------------------------
+
+sites_points <- end %>% activate("nodes") %>% st_as_sf() %>% st_transform(4326) 
+sites_points <- sites_points %>% st_join(x = .,y = sites_nodes %>% st_transform(4326), 
+                                         join = st_nn, k = 1, maxdist = units::set_units(1,m)) %>%
+  filter(!is.na(site_name))
+sites_routes <- end %>% activate("edges") %>% st_as_sf() %>% st_make_valid() %>% 
+  st_transform(4326) 
+
+# Create maps -------------------------------------------------------------
+
 theme_map <- theme_minimal() +
   theme(text = element_text(color = "#22211d"), axis.line = element_blank(), axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks = element_blank(), axis.title.x = element_blank(), axis.title.y = element_blank(),
     panel.grid.major = element_line(color = "#ebebe5", size = 0.2), panel.grid.minor = element_blank(), plot.background = element_rect(fill = "#f5f5f2", color = NA), legend.background = element_rect(fill = "#f5f5f2", color = NA), panel.border = element_blank()
@@ -334,8 +360,8 @@ theme_map <- theme_minimal() +
     geom_sf(data = water_line, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
-    geom_sf(data = activate(end, "edges") %>% st_as_sf(), aes(color = edge_betweeness_centrality_wt, size = edge_betweeness_centrality_wt*.1), alpha = .6) +
-    geom_sf(data = activate(end, "nodes") %>% st_as_sf(), 
+    geom_sf(data = sites_routes, aes(color = edge_betweeness_centrality_wt, size = edge_betweeness_centrality_wt*.1), alpha = .6) +
+    geom_sf(data = sites_points %>% filter(!is.na(site_name)), 
             aes(color =  betweeness_centrality_wt, 
                 fill = betweeness_centrality_wt, 
                 size =  betweeness_centrality_wt), alpha = .8) +
@@ -351,8 +377,8 @@ theme_map <- theme_minimal() +
     geom_sf(data = water_line, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
     geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
-    geom_sf(data = activate(end, "edges") %>% st_as_sf(), color = '#FF9671', size = .9, alpha = .5) +
-    geom_sf(data = sites_clean, aes(size = Tot_area_h, color = Tot_area_h, fill =  Tot_area_h), alpha = .8) +
+    geom_sf(data = sites_routes, color = '#FF9671', size = .9, alpha = .5) +
+    geom_sf(data = sites_points, aes(size = site_size, color = site_size, fill =  site_size), alpha = .8) +
     scale_color_viridis(option = 'viridis') +
     scale_fill_viridis(option = 'viridis') + 
     theme_map + theme(legend.position = 'none',
@@ -361,42 +387,55 @@ theme_map <- theme_minimal() +
 
 (p_size_betweeness <- p_size + p_betweeness)
 
-ggsave(plot = p_size_betweeness, '/Users/nm/Desktop/sites.png')
+# Correlations ------------------------------------------------------------
 
-# Export files ------------------------------------------------------------
-
-sites_points <- end %>% activate("nodes") %>% st_as_sf() %>% st_transform(4326) 
-sites_points <- sites_points %>% st_join(x = .,y = sites_nodes %>% st_transform(4326), 
-                                         join = st_nn, k = 1, maxdist = units::set_units(1,m)) %>%
-  filter(!is.na(Name))
-sites_routes <- end %>% activate("edges") %>% st_as_sf() %>% st_make_valid() %>% 
-  st_transform(4326) 
-
-# Correlation visualization
 sites_corr <- sites_points %>% st_drop_geometry() %>% 
-  #filter(Tot_area_h > 0, betweeness_centrality_wt > 0) %>%
-  dplyr::select(Tot_area_h, betweeness_centrality_wt) %>%
-  rename(`Site size` = Tot_area_h,
+  #filter(site_size > 0, betweeness_centrality_wt > 0) %>%
+  dplyr::select(site_size, betweeness_centrality_wt) %>%
+  #dplyr::select(site_size, eigenvector_centrality_wt, betweeness_centrality_wt, betweeness_centrality, eigen_centrality_wt, pagerank_wt, degree_centrality_wt, hub_centrality_wt, authority_centrality_wt)
+  rename(`Site size` = site_size,
          `Betweeness centrality` = betweeness_centrality_wt)
 (correlo <- ggpairs(sites_corr) + 
     theme(text = element_text(size = 20) ))
-ggsave(plot = correlo, '/Users/nm/Desktop/sites_corr.png')
+
 
 routes_corr <- sites_routes %>% st_drop_geometry() %>%
-  #filter(Tot_area_h > 0, betweeness_centrality_wt > 0) %>%
+  #filter(site_size > 0, betweeness_centrality_wt > 0) %>%
   dplyr::select(edge_betweeness_centrality_wt,
                 travel_hours) %>%
   rename(`Travel hours` =  travel_hours,
          `Edge betweeness centrality` = edge_betweeness_centrality_wt)
 (correlo2 <- ggpairs(routes_corr) + 
     theme(text = element_text(size = 20) ))
+
+
+# Export files ------------------------------------------------------------
+
+# Viz
+ggsave(plot = p_size_betweeness, '/Users/nm/Desktop/sites.png')
+ggsave(plot = correlo, '/Users/nm/Desktop/sites_corr.png')
 ggsave(plot = correlo2, '/Users/nm/Desktop/sites_corr2.png')
 
+# Data
 write_csv(sites_points, '/Users/nm/Desktop/sites.csv')
 st_write(sites_points, '/Users/nm/Desktop/sites.geojson')
 st_write(sites_routes, '/Users/nm/Desktop/sites_routes.geojson')
 
 # Appendix ----------------------------------------------------------------
+
+# Cluster correlations
+sites_clusters <- sites_points %>% 
+  dplyr::group_by(clusters.x) %>% 
+  dplyr::summarise_at(vars(site_size, betweeness_centrality_wt), list(mean), na.rm =TRUE) %>%
+  st_cast("POLYGON") %>% st_convex_hull() %>%
+  st_buffer(dist = units::set_units(10,km))
+
+clusters_corr <- sites_clusters %>% st_drop_geometry() %>%
+  dplyr::select(site_size, betweeness_centrality_wt) %>%
+  rename(`Site size` = site_size,
+         `Betweeness centrality` = betweeness_centrality_wt)
+(correlo3 <- ggpairs(clusters_corr) + 
+    theme(text = element_text(size = 20) ))
 
 # Build local clusters from graph
 sites_clusters_graph <- sites_triangulated_weights_graph %>%
@@ -407,6 +446,7 @@ sites_clusters_graph <- sites_triangulated_weights_graph %>%
   mutate(rank = node_rank_hclust(weights = weight, dist = "shortest", method = "ward.D2")) %>%
   # Map equation to find community structure that minimizes expected length of a random walker trajectory
   mutate(clusters = as.factor(group_infomap(weights = weight, node_weights = rank))) 
+
 sites_clusters <- sites_clusters_graph %>%
   sf::st_as_sf() %>% 
   dplyr::group_by(clusters) %>% dplyr::summarise() %>%
@@ -416,8 +456,3 @@ ggplot() +
   geom_sf(data = sites_clusters, aes(fill = clusters, color = clusters), alpha = .5) + 
   geom_sf(data = sites_clusters_graph %>% activate('nodes') %>% sf::st_as_sf() , color = 'black', alpha = .5) + theme_void()
 
-# -------------------------------------------------------------------------
-
-# To dos:
-# weight for crossing river based on strahler number 
-# River fords are 0 cost

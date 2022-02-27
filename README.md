@@ -4,3 +4,4 @@
 * Take limited geospatial point data representing ancient settlements or points of interest
 * Form topographically-aware settlement networks and then derive centrality measures
 * High level [walkthrough](https://docs.google.com/presentation/d/1VSjuJCoxzvESEjdDCCxa6Nm0wZNgn3JCjob6fSbhjno/) of the method
+* Box folder: https://uchicago.box.com/s/nxqwh8qhkn42aha7h5oivpabvprc0oun

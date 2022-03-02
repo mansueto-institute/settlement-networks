@@ -38,9 +38,10 @@ library(ggnewscale)
 
 # Load and clean up archaeological data -----------------------------------
 
+projpath = '/Users/nm/Desktop/Projects/work/turk-networks/ancient-networks/outputs'
 load(paste0(projpath,"/graphs/graph_output.RData"))
 
-sites <- read_csv('/Users/nm/Desktop/Projects/work/turk-networks/ancient-networks/ca_sites_table_022322.csv')
+sites <- read_csv('/Users/nm/Desktop/Projects/work/turk-networks/ancient-networks/ca_sites_table_010322.csv')
 
 sites_clean <- sites %>%
   select_all(~gsub("\\s+|\\.|\\/", "_", .)) %>%
@@ -52,14 +53,18 @@ sites_clean <- sites %>%
 
 # Parameters --------------------------------------------------------------
 projpath = '/Users/nm/Desktop/Projects/work/turk-networks/ancient-networks/outputs'
-phase_list = c('_all', '_aneo', '_pneo', '_ech', '_m_lch', '_cha', '_eba', '_ebi_ii', '_ebiii', '_mba', '_lba', '_iimill', '_iron', '_eia_mia', '_lia')
+phase_list = c('_all', '_aneo', '_pneo', '_cha', 
+               '_ech', '_m_lch', '_eba', '_ebi_ii', 
+               '_ebiii', '_iimill', '_mba', '_lba', 
+               '_iron', '_eia_mia', '_lia')
+
 
 phase_meta = list('_all' = c('8500-300 BCE', 'Neolithic to Iron Age'), '_aneo' = c('8500-7000 BCE', 'Aceramic Neolithic'), '_pneo' = c('7000-6000 BCE', 'Pottery Neolithic'), '_ech' = c('6000-5500 BCE', 'Early Chalcolithic'), '_m_lch' = c('5500-3300 BCE', 'Mid-Late Chalcolithic'),
                   '_ebi_ii' = c('3300-2500 BCE', 'Early Bronze Age I-II'), '_ebiii' = c('2500-2000 BCE', 'Early Bronze Age III'), '_mba' = c('2000-1650 BCE', 'Middle Bronze Age'), '_lba' = c('1650-1200 BCE', 'Late Bronze Age'),
                   '_eia_mia' = c('1200-700 BCE', 'Early/Mid Iron Age'), '_lia' = c('700-300 BCE', 'Late Iron Age'), '_cha' = c('6000-3300 BCE', 'Chalcolithic'), '_eba' = c('3300-2000 BCE', 'Early Bronze Age'), '_iimill' = c('2000-1200 BCE', '2nd millennium'),  '_iron' = c('1200-300 BCE', 'Iron Age'))
 
-sites_data = sites_clean %>% st_transform(3857)
-
+#sites_data = sites_clean %>% st_transform(3857)
+names(sites_clean)
 # Functions ---------------------------------------------------------------
 
 generate_network <- function(sites_input, phase_suffix) {
@@ -67,8 +72,8 @@ generate_network <- function(sites_input, phase_suffix) {
   message(paste0(phase_suffix))
   # Preprocess data
   message('Preprocess data')
-  sites_input <- sites_data %>% 
-    dplyr::select(c("site_id","name","type", "geometry") | ends_with(phase_suffix)) %>%
+  sites_input <- sites_input %>% 
+    dplyr::select(c("site_id","name","type", "fortified", "geometry") | ends_with(phase_suffix)) %>%
     rename_with(~str_remove(.,  phase_suffix)) %>%
     filter(period == 1) %>%
     mutate(phase = paste0(phase_suffix))
@@ -203,7 +208,7 @@ generate_network <- function(sites_input, phase_suffix) {
     mutate(eigenvector_centrality_wt = centrality_eigen(weights = weight, directed = FALSE),
            betweeness_centrality_wt = centrality_betweenness(weights = weight, directed = FALSE),
            betweeness_centrality = centrality_betweenness(directed = FALSE),
-           eigen_centrality_wt = centrality_eigen(weights = weight, directed = FALSE),
+           #eigen_centrality_wt = centrality_eigen(weights = weight, directed = FALSE),
            #pagerank_wt = centrality_pagerank(weights = weight, directed = FALSE),
            degree_centrality_wt = centrality_degree(weights = weight),
            hub_centrality_wt = centrality_hub(weights= weight),
@@ -229,12 +234,19 @@ generate_network <- function(sites_input, phase_suffix) {
 }
 
 
-visualize_network <- function(sites_points, sites_routes, 
-                              phase_suffix, phase_label, dir_path) {
+visualize_network <- function(sites_points, sites_routes,   
+                              phase_suffix, phase_label, dir_path,
+                              centrality_col, centrality_label) {
+  
+  centrality_col_quo <- enquo(centrality_col)
+  
+  sites_points <- sites_points %>% 
+    dplyr::select(name, area, phase, matches((centrality_col))) %>%
+    rename_with(~ sub((centrality_col), "centrality_metric", .x))
   
   sites_points <- sites_points %>%
     filter(phase %in% c(phase_suffix)) %>%
-    mutate(betweeness_centrality_wt_scale = (betweeness_centrality_wt - min(betweeness_centrality_wt)) / (max(betweeness_centrality_wt) - min(betweeness_centrality_wt)),
+    mutate(centrality_metric_scale = (centrality_metric - min(centrality_metric)) / (max(centrality_metric) - min(centrality_metric)),
            area_scale = (area - min(area)) / (max(area) - min(area)))
   
   sites_routes <- sites_routes %>%
@@ -247,29 +259,30 @@ visualize_network <- function(sites_points, sites_routes,
   
   correlation <- sites_points %>%
     filter(area > 0) %>%
-    dplyr::summarise(correl = paste0('Correlation: ',round(cor(area, betweeness_centrality_wt),4), 
-                                     ' | P-Value: ',round(cor.test(sites_points$area, sites_points$betweeness_centrality_wt, method="pearson")[[3]],4)),
-                     correl2 = paste0('Correlation: ',round(cor.test(sites_points$area, sites_points$betweeness_centrality_wt, method="pearson")[[4]],4))) %>%
+    dplyr::summarise(correl = paste0('Correlation: ',round(cor(area, centrality_metric),4), 
+                                     ' | P-Value: ',round(cor.test(sites_points$area, sites_points$centrality_metric, method="pearson")[[3]],4)),
+                     correl2 = paste0('Correlation: ',round(cor.test(sites_points$area, sites_points$centrality_metric, method="pearson")[[4]],4))) %>%
     pull(correl)
   
-  (p_betweeness<- ggplot() +
+  (p_centrality <- ggplot() +
       geom_raster(data = relief, aes(x = x, y = y, alpha = value)) +
       scale_alpha(range = c(-1.5, 1)) +
       geom_sf(data = water_line, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
       geom_sf(data = water_poly, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
       geom_sf(data = ocean_area, fill = '#008CCB', alpha = .6, color = alpha('#008CCB',.5)) +
       geom_sf(data = sites_routes, 
-              aes(fill = edge_betweeness_centrality_wt_scale,color = edge_betweeness_centrality_wt_scale), 
+              aes(fill = edge_betweeness_centrality_wt_scale, 
+                  color = edge_betweeness_centrality_wt_scale), 
               size = .6, alpha = .6) +
       geom_sf(data = sites_points %>% filter(!is.na(name)), 
-              aes(color =  betweeness_centrality_wt_scale, fill = betweeness_centrality_wt_scale, 
+              aes(color =  centrality_metric_scale, fill = centrality_metric_scale, 
                   size =  area_scale), alpha = .8) +
       scale_color_viridis(option = 'viridis') +
       scale_fill_viridis(option = 'viridis') + 
       theme_map + theme(legend.position = 'none',
                         plot.background = element_blank(),
                         plot.subtitle = element_text(hjust = .5, vjust = -2, size = 13, face = 'bold')) +
-      labs(subtitle = 'Betweeness centrality'))  
+      labs(subtitle = centrality_label))  
   
   (p_size <- ggplot() +
       geom_raster(data = relief, aes(x = x, y = y, alpha = value)) +
@@ -290,20 +303,21 @@ visualize_network <- function(sites_points, sites_routes,
       labs(subtitle = 'Site size'))
   phase_title =  unlist(phase_label, use.names = FALSE)
   title_label = paste0(phase_title[2],': ',phase_title[1])
-  (p_size_betweeness <- p_size + p_betweeness + plot_annotation(
+  
+  (p_size_centrality <- p_size + p_centrality + plot_annotation(
     title = sprintf(title_label),
     caption = correlation) & 
       theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 16, )) ) 
   
-  ggsave(plot = p_size_betweeness, filename = paste0(dir_path,'/',phase_suffix,'.png'),
+  ggsave(plot = p_size_centrality, filename = paste0(dir_path,'/',phase_suffix,'.png'),
          height = 6, width = 10.66, units = "in", dpi = 320, device = 'png')
   
-  return(p_size_betweeness)
+  return(p_size_centrality)
 }
 
 # Download natural data layers ---------------------------------------------
 
-aoi_box = st_bbox(sites_input %>% st_transform(4326)) %>% st_as_sfc()
+aoi_box = st_bbox(sites_clean %>% st_transform(4326)) %>% st_as_sfc()
 aoi_box = (aoi_box - st_centroid(aoi_box)) * 1.1 + st_centroid(aoi_box)
 aoi_box <- aoi_box %>% st_set_crs(4326)
 Sys.sleep(2)
@@ -372,7 +386,7 @@ Sys.sleep(5)
 # list.files(path = filedir)
 
 #ocean <- ne_download(type = 'ocean', scale = 'large', category = 'physical', returnclass='sf')
-ocean <- st_read(paste0(path_dir,'/ne_10m_ocean/ne_10m_ocean.shp'))
+ocean <- st_read(paste0('/Users/nm/Desktop/Projects/work/turk-networks/ancient-networks/ne_10m_ocean/ne_10m_ocean.shp'))
 ocean_resid <- ocean %>% st_transform(4326) %>% st_make_valid() %>%
   st_intersection(., aoi_box) %>%
   st_cast("POLYGON") %>% st_as_sf()
@@ -433,7 +447,7 @@ ggplot() +
 # Deploy functions --------------------------------------------------------
 
 out_full <- map(phase_list, function(x) {
-  generate_network(sites_input = sites_data, 
+  generate_network(sites_input = sites_clean, 
                    phase_suffix = x)
 })
 
@@ -469,6 +483,11 @@ for (i in seq_along(phase_list)) {
                     sites_routes = out_full[[i]]$edges,
                     phase_suffix = phase_list[i],
                     phase_label = phase_meta[i],
-                    dir_path = paste0(projpath,'/maps'))
+                    dir_path = paste0(projpath,'/maps'),
+                    centrality_col = 'betweeness_centrality_wt',
+                    centrality_label = 'Betweeness centrality')
 }
+
+
+
 
